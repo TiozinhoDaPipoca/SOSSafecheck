@@ -1,19 +1,22 @@
 /* =============================================
    SafeCheck SOS — sos.js
-   Lógica de emergência + envio via Telegram
+   Lógica de emergência + Telegram + Live Location
    ============================================= */
 
-let sosCount       = 0;
-let sosResetTimer  = null;
-let emergency      = false;
-let emergencyStart = null;
-let emergencyTimer = null;
-let mediaStream    = null;
-let mediaRecorder  = null;
-let audioChunks    = [];
+let sosCount        = 0;
+let sosResetTimer   = null;
+let emergency       = false;
+let emergencyStart  = null;
+let emergencyTimer  = null;
+let locationTimer   = null;   // atualiza GPS a cada 30s
+let mediaStream     = null;
+let mediaRecorder   = null;
+let audioChunks     = [];
+let sessionId       = null;   // ID único da emergência atual
 
-const SOS_CLICKS  = 3;
-const SOS_TIMEOUT = 2500;
+const SOS_CLICKS    = 3;
+const SOS_TIMEOUT   = 2500;
+const LOCATION_INTERVAL = 30000; // 30 segundos
 
 /* ---- Botão SOS ---- */
 
@@ -51,8 +54,9 @@ function updateDots(n) {
 /* ---- Ativação de emergência ---- */
 
 async function activateEmergency() {
-  emergency      = true;
+  emergency     = true;
   emergencyStart = Date.now();
+  sessionId     = 'sos_' + Date.now(); // ID único desta emergência
 
   // Visual
   document.getElementById('sos-btn').classList.add('emergency');
@@ -61,7 +65,6 @@ async function activateEmergency() {
   document.getElementById('status-label').textContent = '🔴 Emergência ativa!';
   document.getElementById('sos-hint').textContent = 'Alertas sendo enviados...';
   document.getElementById('emergency-bar').classList.add('active');
-  document.getElementById('contact-count')?.setAttribute && null;
 
   // Cronômetro
   emergencyTimer = setInterval(updateTimer, 1000);
@@ -69,18 +72,24 @@ async function activateEmergency() {
   // Som
   playAlertSound();
 
-  // GPS
+  // GPS (aguarda antes de enviar)
+  setEmRow('em-gps', '📍 Obtendo localização...');
   await updateEmergencyLocation();
 
   // Áudio
   if (settings.audio) startRecording();
 
-  // Telegram
+  // Telegram (envia alerta inicial com localização)
   await sendTelegramAlert();
+
+  // Inicia atualização de localização em tempo real a cada 30s
+  if (settings.gps && userLat) {
+    locationTimer = setInterval(sendLocationUpdate, LOCATION_INTERVAL);
+  }
 
   // Histórico
   addHistoryEntry('sos', 'Alerta SOS ativado',
-    `${contacts.length} contato(s) alertado(s)`, 'Ativo');
+    `${contacts.filter(c => c.telegramChatId).length} contato(s) alertado(s)`, 'Ativo');
 
   resetSOS();
 }
@@ -89,7 +98,11 @@ async function activateEmergency() {
 
 async function cancelEmergency() {
   emergency = false;
+
   clearInterval(emergencyTimer);
+  clearInterval(locationTimer);
+  locationTimer = null;
+
   stopRecording();
 
   document.getElementById('sos-btn').classList.remove('emergency');
@@ -103,16 +116,16 @@ async function cancelEmergency() {
 
   updateLastHistoryTag('Cancelado');
   await sendTelegramCancel();
+  sessionId = null;
   showToast('✅ Alerta cancelado. Fique segura!');
 }
 
 /* ---- GPS ---- */
 
 async function updateEmergencyLocation() {
-  const el = document.getElementById('em-gps');
   return new Promise(resolve => {
     if (!settings.gps || !navigator.geolocation) {
-      el.textContent = '📍 GPS não disponível';
+      setEmRow('em-gps', '📍 GPS não disponível');
       resolve();
       return;
     }
@@ -120,21 +133,54 @@ async function updateEmergencyLocation() {
       pos => {
         userLat  = pos.coords.latitude;
         userLong = pos.coords.longitude;
-        el.innerHTML = `📍 GPS obtido — <a href="https://maps.google.com/?q=${userLat},${userLong}" target="_blank" style="color:var(--red-dark);font-weight:600;">Ver no mapa</a>`;
+        setEmRow('em-gps',
+          `📍 GPS: <a href="https://maps.google.com/?q=${userLat},${userLong}" target="_blank" style="color:var(--red-dark);font-weight:600;">Ver no mapa ↗</a>`);
         resolve();
       },
-      () => { el.textContent = '📍 GPS indisponível'; resolve(); },
-      { timeout: 5000, maximumAge: 0 }
+      err => {
+        console.warn('GPS error:', err.message);
+        setEmRow('em-gps', '📍 GPS indisponível');
+        resolve();
+      },
+      { timeout: 6000, maximumAge: 0, enableHighAccuracy: true }
     );
   });
+}
+
+/* ---- Atualização de localização a cada 30s ---- */
+
+async function sendLocationUpdate() {
+  if (!emergency || !sessionId || !userLat) return;
+
+  // Atualiza posição do GPS primeiro
+  navigator.geolocation.getCurrentPosition(
+    async pos => {
+      userLat  = pos.coords.latitude;
+      userLong = pos.coords.longitude;
+
+      setEmRow('em-gps',
+        `📍 GPS atualizado — <a href="https://maps.google.com/?q=${userLat},${userLong}" target="_blank" style="color:var(--red-dark);font-weight:600;">Ver no mapa ↗</a>`);
+
+      try {
+        await fetch('/api/location-update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, location: { lat: userLat, lng: userLong } }),
+        });
+      } catch (err) {
+        console.warn('Erro ao atualizar localização:', err.message);
+      }
+    },
+    () => {}, // silencia erro de GPS na atualização
+    { timeout: 5000, maximumAge: 0, enableHighAccuracy: true }
+  );
 }
 
 /* ---- Gravação de áudio ---- */
 
 function startRecording() {
-  const el = document.getElementById('em-audio');
   if (!navigator.mediaDevices?.getUserMedia) {
-    el.textContent = '🎙️ Gravação não suportada';
+    setEmRow('em-audio', '🎙️ Gravação não suportada neste navegador');
     return;
   }
   navigator.mediaDevices.getUserMedia({ audio: true })
@@ -144,80 +190,104 @@ function startRecording() {
       mediaRecorder = new MediaRecorder(stream);
       mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
       mediaRecorder.start(1000);
-      el.textContent = '🎙️ Gravando áudio...';
-      showToast('🎙️ Gravação iniciada');
+      setEmRow('em-audio', '🎙️ Gravando áudio...');
     })
-    .catch(() => { el.textContent = '🎙️ Microfone negado'; });
+    .catch(err => {
+      console.warn('Microfone negado:', err.message);
+      setEmRow('em-audio', '🎙️ Microfone negado — permita o acesso');
+    });
 }
 
 function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
-  }
-  if (mediaStream) {
-    mediaStream.getTracks().forEach(t => t.stop());
-    mediaStream = null;
-  }
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
 }
 
 /* ---- Cronômetro ---- */
 
 function updateTimer() {
   const diff = Math.floor((Date.now() - emergencyStart) / 1000);
-  const m = String(Math.floor(diff / 60)).padStart(2,'0');
-  const s = String(diff % 60).padStart(2,'0');
+  const m = String(Math.floor(diff / 60)).padStart(2, '0');
+  const s = String(diff % 60).padStart(2, '0');
   const el = document.getElementById('elapsed');
   if (el) el.textContent = `${m}:${s}`;
 }
 
-/* ---- Envio via Telegram (chama o backend) ---- */
+/* ---- Envio Telegram ---- */
 
 async function sendTelegramAlert() {
   const el = document.getElementById('em-telegram');
-  const contactsWithId = contacts.filter(c => c.telegramChatId);
+  const contactsWithId = contacts.filter(c => c.telegramChatId?.trim());
 
   if (contactsWithId.length === 0) {
-    el.textContent = '📲 Nenhum contato com Chat ID configurado';
-    showToast('⚠️ Configure o Chat ID dos contatos!');
+    setEmRow('em-telegram', '📲 ⚠️ Nenhum contato com Chat ID');
+    showToast('⚠️ Cadastre o Chat ID dos contatos!', 5000);
     return;
   }
 
-  el.textContent = `📲 Enviando para ${contactsWithId.length} contato(s)...`;
+  setEmRow('em-telegram', `📲 Enviando para ${contactsWithId.length} contato(s)...`);
 
   try {
     const res = await fetch('/api/alert', {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contacts: contactsWithId,
-        location: userLat ? { lat: userLat, lng: userLong } : null,
-        userName: 'Ana Silva',
+        sessionId,
+        contacts:  contactsWithId,
+        location:  userLat ? { lat: userLat, lng: userLong } : null,
+        userName:  'Ana Silva',
       }),
     });
 
     const data = await res.json();
-    const ok   = data.results?.filter(r => r.ok).length || 0;
-    const fail = data.results?.filter(r => !r.ok).length || 0;
 
-    el.textContent = ok > 0
-      ? `📲 ✅ ${ok} alerta(s) enviado(s)${fail > 0 ? ` · ⚠️ ${fail} falhou` : ''}`
-      : '📲 ❌ Falha ao enviar alertas';
+    if (!res.ok || !data.ok) {
+      // Mostra erros detalhados de cada contato
+      const erros = (data.results || [])
+        .filter(r => !r.ok)
+        .map(r => `${r.name}: ${r.tip || r.error}`)
+        .join(' | ');
 
-    showToast(ok > 0 ? `🆘 ${ok} contato(s) alertado(s) pelo Telegram!` : '❌ Erro ao enviar alertas');
-  } catch {
-    el.textContent = '📲 ❌ Servidor offline';
-    showToast('❌ Servidor indisponível. Verifique a conexão.');
+      setEmRow('em-telegram', `📲 ❌ Erro: ${erros || data.error || 'Falha desconhecida'}`);
+      showToast(`❌ Erro: ${erros || 'Verifique o Chat ID dos contatos'}`, 6000);
+      return;
+    }
+
+    const ok   = data.results.filter(r => r.ok).length;
+    const fail = data.results.filter(r => !r.ok);
+
+    let statusText = `📲 ✅ ${ok} alerta(s) enviado(s)`;
+    if (fail.length > 0) {
+      const dicas = fail.map(r => `${r.name}: ${r.tip || r.error}`).join(' | ');
+      statusText += ` · ⚠️ ${fail.length} falhou — ${dicas}`;
+    }
+
+    setEmRow('em-telegram', statusText);
+    showToast(ok > 0 ? `🆘 ${ok} contato(s) alertado(s) pelo Telegram!` : '❌ Nenhum alerta enviado');
+
+  } catch (err) {
+    console.error('sendTelegramAlert error:', err);
+    setEmRow('em-telegram', '📲 ❌ Servidor offline — rode npm start');
+    showToast('❌ Servidor offline. Rode: npm start', 6000);
   }
 }
 
 async function sendTelegramCancel() {
-  const contactsWithId = contacts.filter(c => c.telegramChatId);
-  if (contactsWithId.length === 0) return;
+  const contactsWithId = contacts.filter(c => c.telegramChatId?.trim());
+  if (!contactsWithId.length) return;
   try {
     await fetch('/api/cancel', {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contacts: contactsWithId, userName: 'Ana Silva' }),
+      body: JSON.stringify({ sessionId, contacts: contactsWithId, userName: 'Ana Silva' }),
     });
-  } catch {}
+  } catch (err) {
+    console.warn('Erro ao cancelar:', err.message);
+  }
+}
+
+/* ---- Helper: atualiza linha da barra de emergência ---- */
+function setEmRow(id, html) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = html;
 }

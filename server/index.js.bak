@@ -1,0 +1,326 @@
+// =============================================
+// SafeCheck SOS — server/index.js
+// Backend Express + Telegram Bot
+// =============================================
+
+require('dotenv').config();
+const express     = require('express');
+const cors        = require('cors');
+const path        = require('path');
+const TelegramBot = require('node-telegram-bot-api');
+
+const app   = express();
+const PORT  = process.env.PORT || 3000;
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+
+// ---- Validação do token ----
+if (!TOKEN) {
+  console.error('❌ TELEGRAM_BOT_TOKEN não definido no .env');
+  process.exit(1);
+}
+
+// ---- Inicializa o Bot com polling (para receber /start dos contatos) ----
+const bot = new TelegramBot(TOKEN, { polling: true });
+
+// Verifica token e loga nome do bot
+bot.getMe()
+  .then(info => console.log(`🤖 Bot conectado: @${info.username}`))
+  .catch(err => {
+    console.error('❌ Token do Telegram inválido:', err.message);
+    process.exit(1);
+  });
+
+// ---- Responde /start — envia Chat ID automaticamente para o contato ----
+bot.onText(/\/start/, (msg) => {
+  const chatId   = msg.chat.id;
+  const firstName = msg.from.first_name || 'Olá';
+  const response = [
+    `👋 Olá, ${firstName}!`,
+    '',
+    '🛡️ Você foi cadastrado no *SafeCheck SOS* como contato de emergência.',
+    '',
+    '📋 *Seu Chat ID é:*',
+    `\`${chatId}\``,
+    '',
+    'Envie esse número para quem te cadastrou no app.',
+    'Quando ela acionar o SOS, você receberá um alerta imediato aqui.',
+    '',
+    '💙 Obrigado por fazer parte da rede de segurança dela!',
+  ].join('\n');
+
+  bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
+  console.log(`👤 Novo contato registrou /start — Chat ID: ${chatId} (${firstName})`);
+});
+
+// ---- Responde /id — forma alternativa de obter o Chat ID ----
+bot.onText(/\/id/, (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, `Seu Chat ID é: \`${chatId}\``, { parse_mode: 'Markdown' });
+});
+
+// ---- Responde qualquer mensagem desconhecida ----
+bot.on('message', (msg) => {
+  if (msg.text && !msg.text.startsWith('/')) {
+    bot.sendMessage(msg.chat.id,
+      'ℹ️ Para ver seu Chat ID, envie /start ou /id'
+    );
+  }
+});
+
+// ---- Middlewares ----
+app.use(cors());
+app.use(express.json({ limit: '1mb' }));
+app.use(express.static(path.join(__dirname, '../public')));
+
+// ---- Log de todas as requisições ----
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  }
+  next();
+});
+
+// =============================================
+// SESSÕES DE LOCALIZAÇÃO EM TEMPO REAL
+// Guarda o estado de cada emergência ativa
+// =============================================
+// { sessionId: { contacts, userName, liveMessageIds: {chatId: messageId}, interval } }
+const activeSessions = new Map();
+
+// =============================================
+// ROTAS DA API
+// =============================================
+
+/**
+ * GET /api/status
+ */
+app.get('/api/status', (req, res) => {
+  res.json({ ok: true, message: 'SafeCheck SOS online' });
+});
+
+/**
+ * GET /api/bot-info
+ */
+app.get('/api/bot-info', async (req, res) => {
+  try {
+    const info = await bot.getMe();
+    res.json({ ok: true, bot: info });
+  } catch (err) {
+    console.error('bot-info error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/alert
+ * Envia alerta inicial + localização em tempo real via Live Location do Telegram.
+ *
+ * Body:
+ * {
+ *   sessionId: "abc123",
+ *   contacts:  [{ name, telegramChatId }],
+ *   location:  { lat, lng } | null,
+ *   userName:  "Ana Silva"
+ * }
+ */
+app.post('/api/alert', async (req, res) => {
+  const { sessionId, contacts, location, userName } = req.body;
+
+  // Validações
+  if (!contacts || contacts.length === 0) {
+    return res.status(400).json({ ok: false, error: 'Nenhum contato informado' });
+  }
+  if (!sessionId) {
+    return res.status(400).json({ ok: false, error: 'sessionId obrigatório' });
+  }
+
+  const name     = userName || 'Usuária';
+  const results  = [];
+  const liveIds  = {}; // { chatId: messageId } — para atualizar localização depois
+
+  const contactsWithId = contacts.filter(c => c.telegramChatId);
+  if (contactsWithId.length === 0) {
+    return res.status(400).json({ ok: false, error: 'Nenhum contato tem Chat ID configurado' });
+  }
+
+  // Monta mensagem de texto (sem Markdown para evitar erros de parse)
+  const locationLine = location
+    ? `Localização atual: https://maps.google.com/?q=${location.lat},${location.lng}`
+    : 'Localização não disponível';
+
+  const textMessage = [
+    '🆘 ALERTA DE EMERGÊNCIA — SafeCheck SOS',
+    '',
+    `⚠️ ${name} ativou o botão de emergência!`,
+    '',
+    locationLine,
+    '',
+    '🎙️ Gravação de áudio iniciada automaticamente.',
+    '📍 A localização em tempo real será atualizada abaixo.',
+    '',
+    'Se ela estiver em perigo, entre em contato ou acione as autoridades.',
+    '',
+    'Emergências: 190 (Polícia) | 192 (SAMU) | 180 (CVM)',
+  ].join('\n');
+
+  // Envia para cada contato
+  for (const contact of contactsWithId) {
+    const chatId = String(contact.telegramChatId).trim();
+    console.log(`📤 Enviando alerta para ${contact.name} (chatId: ${chatId})`);
+
+    try {
+      // 1. Envia mensagem de texto
+      await bot.sendMessage(chatId, textMessage);
+      console.log(`  ✅ Mensagem de texto enviada`);
+
+      // 2. Envia localização ao vivo (Live Location — atualiza por 1 hora)
+      if (location) {
+        const liveMsg = await bot.sendLocation(
+          chatId,
+          location.lat,
+          location.lng,
+          { live_period: 3600 } // 1 hora de localização ao vivo
+        );
+        liveIds[chatId] = liveMsg.message_id;
+        console.log(`  ✅ Live Location enviada (messageId: ${liveMsg.message_id})`);
+      }
+
+      results.push({ name: contact.name, chatId, ok: true });
+    } catch (err) {
+      console.error(`  ❌ Erro para ${contact.name} (${chatId}):`, err.message);
+      // Erros comuns:
+      // "chat not found"  → chat ID errado ou contato nunca iniciou o bot
+      // "bot was blocked" → contato bloqueou o bot
+      // "Forbidden"       → bot não tem permissão
+      results.push({
+        name:  contact.name,
+        chatId,
+        ok:    false,
+        error: err.message,
+        tip:   chatIdErrorTip(err.message),
+      });
+    }
+  }
+
+  // Salva sessão para poder atualizar localização depois
+  activeSessions.set(sessionId, {
+    contacts: contactsWithId,
+    userName: name,
+    liveIds,
+  });
+
+  const anySuccess = results.some(r => r.ok);
+  console.log(`📊 Resultado: ${results.filter(r=>r.ok).length} ok, ${results.filter(r=>!r.ok).length} erro(s)`);
+
+  res.status(anySuccess ? 200 : 500).json({ ok: anySuccess, results });
+});
+
+/**
+ * POST /api/location-update
+ * Atualiza a localização ao vivo no Telegram a cada 30 segundos.
+ *
+ * Body: { sessionId, location: { lat, lng } }
+ */
+app.post('/api/location-update', async (req, res) => {
+  const { sessionId, location } = req.body;
+
+  if (!sessionId || !location) {
+    return res.status(400).json({ ok: false, error: 'sessionId e location obrigatórios' });
+  }
+
+  const session = activeSessions.get(sessionId);
+  if (!session) {
+    return res.status(404).json({ ok: false, error: 'Sessão não encontrada ou já encerrada' });
+  }
+
+  const results = [];
+
+  for (const [chatId, messageId] of Object.entries(session.liveIds)) {
+    try {
+      // Atualiza a mensagem de localização ao vivo no Telegram
+      await bot.editMessageLiveLocation(location.lat, location.lng, {
+        chat_id:    chatId,
+        message_id: messageId,
+      });
+      results.push({ chatId, ok: true });
+    } catch (err) {
+      // Live location pode expirar ou ser parada pelo contato — não é erro crítico
+      console.warn(`  ⚠️ Não foi possível atualizar live location para ${chatId}:`, err.message);
+      results.push({ chatId, ok: false, error: err.message });
+    }
+  }
+
+  res.json({ ok: true, results });
+});
+
+/**
+ * POST /api/cancel
+ * Para a localização ao vivo e avisa os contatos que o alerta foi cancelado.
+ *
+ * Body: { sessionId, contacts, userName }
+ */
+app.post('/api/cancel', async (req, res) => {
+  const { sessionId, contacts, userName } = req.body;
+  const name = userName || 'Usuária';
+
+  const session = activeSessions.get(sessionId);
+
+  const cancelMessage = [
+    '✅ Alerta cancelado — SafeCheck SOS',
+    '',
+    `${name} está segura e cancelou o alerta.`,
+    '',
+    'Nenhuma ação necessária. Obrigado por estar disponível! 💙',
+  ].join('\n');
+
+  const contactsWithId = (contacts || []).filter(c => c.telegramChatId);
+  const results = [];
+
+  for (const contact of contactsWithId) {
+    const chatId = String(contact.telegramChatId).trim();
+    try {
+      // Para a localização ao vivo (se existir)
+      if (session && session.liveIds[chatId]) {
+        await bot.stopMessageLiveLocation({
+          chat_id:    chatId,
+          message_id: session.liveIds[chatId],
+        }).catch(() => {}); // ignora erro se já expirou
+      }
+
+      // Envia mensagem de cancelamento
+      await bot.sendMessage(chatId, cancelMessage);
+      results.push({ name: contact.name, ok: true });
+      console.log(`✅ Cancelamento enviado para ${contact.name}`);
+    } catch (err) {
+      results.push({ name: contact.name, ok: false, error: err.message });
+      console.error(`❌ Erro ao cancelar para ${contact.name}:`, err.message);
+    }
+  }
+
+  // Remove sessão
+  if (sessionId) activeSessions.delete(sessionId);
+
+  res.json({ ok: true, results });
+});
+
+// ---- Fallback SPA ----
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
+// ---- Inicia servidor ----
+app.listen(PORT, () => {
+  console.log(`\n🛡️  SafeCheck SOS rodando em http://localhost:${PORT}\n`);
+});
+
+// ---- Helpers ----
+
+function chatIdErrorTip(errorMsg) {
+  if (errorMsg.includes('chat not found'))
+    return 'Chat ID incorreto ou contato nunca enviou /start para o bot';
+  if (errorMsg.includes('blocked'))
+    return 'O contato bloqueou o bot — peça para desbloquear';
+  if (errorMsg.includes('Forbidden'))
+    return 'Bot sem permissão — o contato precisa enviar /start novamente';
+  return 'Verifique se o Chat ID está correto e se o contato iniciou o bot';
+}
