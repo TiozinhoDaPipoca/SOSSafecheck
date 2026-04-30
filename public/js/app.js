@@ -67,14 +67,14 @@ function initProfile() {
 async function checkBotStatus() {
   const statusEl = document.getElementById('bot-status');
   const iconEl   = document.getElementById('bot-status-icon');
+  const base     = window.location.origin;
   try {
-    const res  = await fetch('/api/status');
+    const res  = await fetch(`${base}/api/status`);
     const data = await res.json();
     if (data.ok) {
       statusEl.textContent = 'Bot conectado e online';
       iconEl.textContent   = '✅';
-      // Busca nome do bot
-      const botRes  = await fetch('/api/bot-info');
+      const botRes  = await fetch(`${base}/api/bot-info`);
       const botData = await botRes.json();
       if (botData.ok && botData.bot) {
         const name = '@' + botData.bot.username;
@@ -82,7 +82,7 @@ async function checkBotStatus() {
       }
     }
   } catch {
-    statusEl.textContent = 'Servidor offline — rode localmente';
+    statusEl.textContent = 'Servidor offline — verifique o Render';
     iconEl.textContent   = '❌';
   }
 }

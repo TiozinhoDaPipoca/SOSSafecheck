@@ -18,6 +18,9 @@ const SOS_CLICKS    = 3;
 const SOS_TIMEOUT   = 2500;
 const LOCATION_INTERVAL = 30000; // 30 segundos
 
+// Detecta URL base automaticamente (funciona local e no Render)
+const API_BASE = window.location.origin;
+
 /* ---- Botão SOS ---- */
 
 function handleSOS() {
@@ -162,7 +165,7 @@ async function sendLocationUpdate() {
         `📍 GPS atualizado — <a href="https://maps.google.com/?q=${userLat},${userLong}" target="_blank" style="color:var(--red-dark);font-weight:600;">Ver no mapa ↗</a>`);
 
       try {
-        await fetch('/api/location-update', {
+        await fetch(`${API_BASE}/api/location-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionId, location: { lat: userLat, lng: userLong } }),
@@ -228,7 +231,7 @@ async function sendTelegramAlert() {
   setEmRow('em-telegram', `📲 Enviando para ${contactsWithId.length} contato(s)...`);
 
   try {
-    const res = await fetch('/api/alert', {
+    const res = await fetch(`${API_BASE}/api/alert`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -276,7 +279,7 @@ async function sendTelegramCancel() {
   const contactsWithId = contacts.filter(c => c.telegramChatId?.trim());
   if (!contactsWithId.length) return;
   try {
-    await fetch('/api/cancel', {
+    await fetch(`${API_BASE}/api/cancel`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId, contacts: contactsWithId, userName: 'Ana Silva' }),
