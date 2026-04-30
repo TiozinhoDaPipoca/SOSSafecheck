@@ -230,8 +230,11 @@ async function sendTelegramAlert() {
 
   setEmRow('em-telegram', `📲 Enviando para ${contactsWithId.length} contato(s)...`);
 
+  const url = `${API_BASE}/api/alert`;
+  console.log('🚀 Chamando:', url);
+
   try {
-    const res = await fetch(`${API_BASE}/api/alert`, {
+    const res = await fetch(url, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
