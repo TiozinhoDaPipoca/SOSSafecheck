@@ -86,7 +86,7 @@ async function testContact(index) {
   if (btn) { btn.textContent = 'Enviando...'; btn.disabled = true; }
 
   try {
-    const res  = await fetch('/api/test-contact', {
+    const res  = await fetch(`${window.location.origin}/api/test-contact`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ chatId: contact.telegramChatId, name: contact.name }),
