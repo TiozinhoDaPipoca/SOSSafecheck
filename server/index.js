@@ -1,132 +1,85 @@
-// =============================================
-// SafeCheck SOS — server/index.js
-// =============================================
-
 require('dotenv').config();
-const express     = require('express');
-const cors        = require('cors');
-const path        = require('path');
-const TelegramBot = require('node-telegram-bot-api');
+const express      = require('express');
+const cors         = require('cors');
+const path         = require('path');
+const TelegramBot  = require('node-telegram-bot-api');
 
 const app   = express();
 const PORT  = process.env.PORT || 3000;
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
 if (!TOKEN || TOKEN === 'seu_token_aqui') {
-  console.error('❌ ERRO: TELEGRAM_BOT_TOKEN não definido no .env!');
+  console.error('❌ TELEGRAM_BOT_TOKEN não definido no .env!');
   process.exit(1);
 }
 
-console.log('🤖 Iniciando bot...');
-
-// ---- Bot com polling ativado (escuta mensagens) ----
 const bot = new TelegramBot(TOKEN, { polling: true });
 
 bot.getMe()
-  .then(info => console.log(`✅ Bot conectado: @${info.username}`))
-  .catch(err => {
-    console.error('❌ Token inválido:', err.message);
-    process.exit(1);
-  });
+  .then(info => console.log(`✅ Bot: @${info.username}`))
+  .catch(err => { console.error('❌ Token inválido:', err.message); process.exit(1); });
 
-// ---- Responde ao /start com o Chat ID ----
+// Responde /start com Chat ID
 bot.onText(/\/start/, (msg) => {
-  const chatId   = msg.chat.id;
-  const firstName = msg.from.first_name || 'você';
-
-  const resposta = [
-    `👋 Olá, ${firstName}!`,
-    '',
-    'Você foi cadastrado como contato de emergência no *SafeCheck SOS*.',
-    '',
-    '🔑 *Seu Chat ID é:*',
-    `\`${chatId}\``,
-    '',
-    'Copie esse número e envie para quem te cadastrou no app.',
-    'Ele precisa colocar esse número no campo *"Telegram Chat ID"* do seu contato.',
-    '',
-    '✅ Depois disso, você receberá alertas de emergência automaticamente.',
-  ].join('\n');
-
-  bot.sendMessage(chatId, resposta, { parse_mode: 'Markdown' })
-    .then(() => console.log(`✅ /start respondido para ${firstName} (Chat ID: ${chatId})`))
-    .catch(err => console.error('Erro ao responder /start:', err.message));
-});
-
-// ---- Responde ao /id (alternativa) ----
-bot.onText(/\/id/, (msg) => {
   const chatId = msg.chat.id;
-  bot.sendMessage(chatId, `🔑 Seu Chat ID é: \`${chatId}\``, { parse_mode: 'Markdown' });
+  const name   = msg.from.first_name || 'você';
+  bot.sendMessage(chatId, [
+    `👋 Olá, ${name}!`,
+    '',
+    'Você foi cadastrado como contato de emergência no SafeCheck SOS.',
+    '',
+    '🔑 Seu Chat ID é:',
+    `${chatId}`,
+    '',
+    'Copie esse número e envie para quem te cadastrou no app. ✅',
+  ].join('\n'))
+  .then(() => console.log(`✅ /start respondido — ${name} (${chatId})`))
+  .catch(err => console.error('Erro /start:', err.message));
 });
 
-// ---- Middlewares ----
+bot.onText(/\/id/, (msg) => {
+  bot.sendMessage(msg.chat.id, `🔑 Seu Chat ID é: ${msg.chat.id}`);
+});
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
-// =============================================
-// ROTAS DA API
-// =============================================
-
-app.get('/api/status', (req, res) => {
-  res.json({ ok: true, message: 'SafeCheck SOS online ✅' });
-});
-
+app.get('/api/status',   (req, res) => res.json({ ok: true }));
 app.get('/api/bot-info', async (req, res) => {
-  try {
-    const info = await bot.getMe();
-    res.json({ ok: true, bot: info });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
+  try { res.json({ ok: true, bot: await bot.getMe() }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-// ---- Testa envio para um contato específico ----
+// ---- Testa contato específico ----
 app.post('/api/test-contact', async (req, res) => {
   const { chatId, name } = req.body;
-  console.log(`\n🧪 TESTE para ${name} (${chatId})`);
-
   if (!chatId) return res.status(400).json({ ok: false, error: 'Chat ID não informado' });
-
-  const message = [
-    '✅ Teste do SafeCheck SOS',
-    '',
-    `Olá! Você está cadastrado como contato de emergência de ${name || 'uma usuária'}.`,
-    '',
-    'Quando ela acionar o botão SOS, você receberá um alerta aqui. 🛡️',
-  ].join('\n');
-
   try {
-    await bot.sendMessage(String(chatId).trim(), message);
-    console.log(`   ✅ Teste enviado para ${name}`);
+    await bot.sendMessage(String(chatId).trim(), [
+      '✅ Teste do SafeCheck SOS',
+      '',
+      `Você está cadastrado como contato de emergência.`,
+      'Quando o SOS for ativado, você receberá um alerta aqui. 🛡️',
+    ].join('\n'));
     res.json({ ok: true });
   } catch (err) {
-    console.error(`   ❌ Erro no teste:`, err.message);
     let tip = err.message;
-    if (err.message.includes('chat not found')) {
-      tip = 'Chat ID inválido — o contato precisa enviar /start para o @Heloale_bot primeiro';
-    } else if (err.message.includes('bot was blocked')) {
-      tip = 'O contato bloqueou o bot — peça para desbloquear';
-    }
+    if (err.message.includes('chat not found')) tip = 'Chat ID inválido — contato precisa enviar /start para o bot primeiro';
+    else if (err.message.includes('bot was blocked')) tip = 'Contato bloqueou o bot';
     res.status(400).json({ ok: false, error: err.message, tip });
   }
 });
 
-// ---- Envia alerta de emergência ----
+// ---- Alerta de emergência ----
 app.post('/api/alert', async (req, res) => {
   const { contacts, location, userName } = req.body;
+  console.log('\n🆘 ALERTA — usuária:', userName, '| contatos:', contacts?.length);
 
-  console.log('\n🆘 ALERTA RECEBIDO');
-  console.log('   Usuária:', userName);
-  console.log('   Contatos:', contacts?.length);
-  console.log('   Localização:', location);
-
-  if (!contacts || contacts.length === 0) {
-    return res.status(400).json({ ok: false, error: 'Nenhum contato informado' });
-  }
+  if (!contacts?.length) return res.status(400).json({ ok: false, error: 'Nenhum contato' });
 
   const locationLine = location
-    ? `📍 Localização atual: https://maps.google.com/?q=${location.lat},${location.lng}`
+    ? `📍 Localização: https://maps.google.com/?q=${location.lat},${location.lng}`
     : '📍 Localização não disponível';
 
   const message = [
@@ -136,99 +89,70 @@ app.post('/api/alert', async (req, res) => {
     '',
     locationLine,
     '',
-    '🎙️ Gravação de áudio iniciada automaticamente.',
-    '',
-    '🔴 Se ela estiver em perigo, entre em contato agora ou acione as autoridades.',
+    '🎙️ Gravação de áudio iniciada.',
+    '🔴 Entre em contato agora ou acione as autoridades.',
     '',
     '📞 190 (Polícia) | 192 (SAMU) | 180 (Central da Mulher)',
   ].join('\n');
 
   const results = [];
-
   for (const contact of contacts) {
-    if (!contact.telegramChatId) {
-      console.log(`   ⚠️  ${contact.name}: sem Chat ID`);
-      results.push({ name: contact.name, ok: false, error: 'Chat ID não configurado' });
-      continue;
-    }
-
+    if (!contact.telegramChatId) { results.push({ name: contact.name, ok: false, error: 'Sem Chat ID' }); continue; }
     const chatId = String(contact.telegramChatId).trim();
-    console.log(`   📤 Enviando para ${contact.name} (${chatId})...`);
-
     try {
       await bot.sendMessage(chatId, message);
-      console.log(`   ✅ Mensagem enviada para ${contact.name}`);
-
-      if (location) {
-        await bot.sendLocation(chatId, location.lat, location.lng);
-        console.log(`   ✅ Localização enviada para ${contact.name}`);
-      }
-
+      if (location) await bot.sendLocation(chatId, parseFloat(location.lat), parseFloat(location.lng));
       results.push({ name: contact.name, ok: true });
-
+      console.log(`   ✅ ${contact.name}`);
     } catch (err) {
-      console.error(`   ❌ Erro com ${contact.name}:`, err.message);
-
-      let errorMsg = err.message;
-      if (err.message.includes('chat not found')) {
-        errorMsg = 'Chat ID inválido — contato precisa enviar /start para o bot';
-      } else if (err.message.includes('bot was blocked')) {
-        errorMsg = 'Contato bloqueou o bot';
-      }
-
-      results.push({ name: contact.name, ok: false, error: errorMsg });
+      console.error(`   ❌ ${contact.name}:`, err.message);
+      results.push({ name: contact.name, ok: false, error: err.message });
     }
   }
 
   const successCount = results.filter(r => r.ok).length;
-  console.log(`\n   ✅ ${successCount}/${contacts.length} enviados\n`);
-
-  res.json({ ok: successCount > 0, successCount, totalContacts: contacts.length, results });
+  res.json({ ok: successCount > 0, successCount, results });
 });
 
-// ---- Cancela alerta ----
-app.post('/api/cancel', async (req, res) => {
-  const { contacts, userName } = req.body;
-  console.log('\n✅ CANCELAMENTO — usuária:', userName);
-
-  if (!contacts || contacts.length === 0) {
-    return res.status(400).json({ ok: false, error: 'Nenhum contato informado' });
-  }
+// ---- Atualização de localização em tempo real ----
+app.post('/api/location-update', async (req, res) => {
+  const { contacts, location, userName } = req.body;
+  if (!contacts?.length || !location) return res.json({ ok: false });
 
   const message = [
-    '✅ Alerta cancelado — SafeCheck SOS',
-    '',
-    `${userName || 'Usuária'} está segura e cancelou o alerta.`,
-    '',
-    'Nenhuma ação necessária. Obrigado por estar disponível! 💙',
+    `📍 Localização atualizada — ${userName || 'Usuária'}`,
+    `https://maps.google.com/?q=${location.lat},${location.lng}`,
+    `🕐 ${new Date().toLocaleTimeString('pt-BR')}`,
   ].join('\n');
 
-  const results = [];
-
   for (const contact of contacts) {
-    if (!contact.telegramChatId) {
-      results.push({ name: contact.name, ok: false, error: 'Sem Chat ID' });
-      continue;
-    }
+    if (!contact.telegramChatId) continue;
     try {
+      await bot.sendLocation(String(contact.telegramChatId).trim(), parseFloat(location.lat), parseFloat(location.lng));
       await bot.sendMessage(String(contact.telegramChatId).trim(), message);
-      results.push({ name: contact.name, ok: true });
-      console.log(`   ✅ Cancelamento enviado para ${contact.name}`);
     } catch (err) {
-      results.push({ name: contact.name, ok: false, error: err.message });
-      console.error(`   ❌ Erro cancelamento ${contact.name}:`, err.message);
+      console.error('Erro location-update:', err.message);
     }
   }
 
-  res.json({ ok: true, results });
+  res.json({ ok: true });
 });
 
-// Fallback
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/index.html'));
+// ---- Cancelamento ----
+app.post('/api/cancel', async (req, res) => {
+  const { contacts, userName } = req.body;
+  if (!contacts?.length) return res.json({ ok: false });
+  const message = `✅ Alerta cancelado — ${userName || 'Usuária'} está segura. Obrigado! 💙`;
+  for (const contact of contacts) {
+    if (!contact.telegramChatId) continue;
+    try { await bot.sendMessage(String(contact.telegramChatId).trim(), message); } catch {}
+  }
+  res.json({ ok: true });
 });
+
+app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 
 app.listen(PORT, () => {
-  console.log(`\n🛡️  SafeCheck SOS rodando em http://localhost:${PORT}`);
-  console.log('📨 Bot escutando mensagens (polling ativo)\n');
+  console.log(`\n🛡️  SafeCheck SOS: http://localhost:${PORT}`);
+  console.log('📨 Bot escutando mensagens\n');
 });

@@ -1,40 +1,126 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#E24B4A" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
+  <meta name="theme-color" content="#E24B4A"/>
   <title>SafeCheck SOS</title>
-  <link rel="stylesheet" href="/css/style.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;900&display=swap" rel="stylesheet"/>
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
-<div id="app">
-
-  <!-- ===== TELA: HOME / SOS ===== -->
-  <div class="screen active" id="screen-home">
-    <div class="topbar">
-      <div class="logo">
-        <div class="logo-icon">🛡️</div>
-        SafeCheck SOS
-      </div>
-      <div id="loc-badge">
-        <span>📍</span>
-        <span id="loc-text">Localizando...</span>
-      </div>
+<!-- ===== TELA DE LOGIN / CADASTRO ===== -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">🛡️</div>
+      <div class="auth-logo-text">SafeCheck SOS</div>
+      <div class="auth-logo-sub">Segurança sempre com você</div>
     </div>
 
+    <!-- Abas -->
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-tab="login"    onclick="showAuthTab('login')">Entrar</button>
+      <button class="auth-tab"        data-tab="cadastro" onclick="showAuthTab('cadastro')">Cadastrar</button>
+      <button class="auth-tab"        data-tab="telefone" onclick="showAuthTab('telefone')">Telefone</button>
+    </div>
+
+    <!-- Erro -->
+    <div id="auth-error" class="auth-error"></div>
+
+    <!-- Form: Login -->
+    <div class="auth-form active" id="form-login">
+      <div class="form-row">
+        <label class="form-label">Email</label>
+        <input class="form-input" id="login-email" type="email" placeholder="seu@email.com"/>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Senha</label>
+        <input class="form-input" id="login-pass" type="password" placeholder="Sua senha"/>
+      </div>
+      <button class="auth-submit-btn" data-label="Entrar" onclick="signInEmail()">Entrar</button>
+      <button class="auth-link-btn" onclick="resetPassword()">Esqueci minha senha</button>
+      <div class="auth-divider"><span>ou</span></div>
+      <button class="google-btn" onclick="signInGoogle()">
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18"/>
+        Entrar com Google
+      </button>
+    </div>
+
+    <!-- Form: Cadastro -->
+    <div class="auth-form" id="form-cadastro">
+      <div class="form-row">
+        <label class="form-label">Nome completo</label>
+        <input class="form-input" id="signup-name" type="text" placeholder="Seu nome completo"/>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Email</label>
+        <input class="form-input" id="signup-email" type="email" placeholder="seu@email.com"/>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Telefone (opcional)</label>
+        <input class="form-input" id="signup-phone" type="tel" placeholder="(21) 99999-9999"/>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Senha</label>
+        <input class="form-input" id="signup-pass" type="password" placeholder="Mínimo 6 caracteres"/>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Confirmar senha</label>
+        <input class="form-input" id="signup-pass2" type="password" placeholder="Repita a senha"/>
+      </div>
+      <button class="auth-submit-btn" data-label="Criar conta" onclick="signUpEmail()">Criar conta</button>
+      <div class="auth-divider"><span>ou</span></div>
+      <button class="google-btn" onclick="signInGoogle()">
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18"/>
+        Cadastrar com Google
+      </button>
+    </div>
+
+    <!-- Form: Telefone -->
+    <div class="auth-form" id="form-telefone">
+      <div id="sms-step1">
+        <div class="form-row">
+          <label class="form-label">Número de WhatsApp</label>
+          <input class="form-input" id="phone-number" type="tel" placeholder="(21) 99999-9999"/>
+        </div>
+        <p class="auth-hint">Você receberá um código SMS para confirmar</p>
+        <button class="auth-submit-btn" data-label="Enviar código" onclick="sendSMSCode()">Enviar código</button>
+      </div>
+      <div id="sms-step2" style="display:none">
+        <div class="form-row">
+          <label class="form-label">Código recebido por SMS</label>
+          <input class="form-input" id="sms-code" type="number" placeholder="123456"/>
+        </div>
+        <button class="auth-submit-btn" data-label="Verificar" onclick="verifySMSCode()">Verificar</button>
+        <button class="auth-link-btn" onclick="document.getElementById('sms-step1').style.display='block';document.getElementById('sms-step2').style.display='none'">Reenviar código</button>
+      </div>
+      <div id="recaptcha-container"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== APP PRINCIPAL ===== -->
+<div id="app" style="display:none">
+
+  <!-- HOME -->
+  <div class="screen active" id="screen-home">
+    <div class="topbar">
+      <div class="logo"><div class="logo-icon">🛡️</div>SafeCheck SOS</div>
+      <div id="loc-badge"><span>📍</span><span id="loc-text">Localizando...</span></div>
+    </div>
     <div class="content">
       <div class="home-hero">
         <div class="status-badge">
           <div class="status-dot"></div>
           <span id="status-label">Você está protegida</span>
         </div>
-
         <div class="sos-ring-wrap">
           <div class="sos-ring sos-ring-1" id="ring1"></div>
           <div class="sos-ring sos-ring-2" id="ring2"></div>
@@ -43,59 +129,39 @@
             <span class="sos-btn-label">SOS</span>
           </button>
         </div>
-
         <div class="sos-counter">
           <div class="counter-dot" id="dot1"></div>
           <div class="counter-dot" id="dot2"></div>
           <div class="counter-dot" id="dot3"></div>
         </div>
-        <p class="sos-hint" id="sos-hint">Toque 3× na tela ou pressione Volume+ 3×</p>
+        <p class="sos-hint" id="sos-hint">Toque 3× ou pressione Volume+ 3×</p>
       </div>
 
-      <!-- Barra de emergência -->
       <div class="emergency-bar" id="emergency-bar">
         <div class="emergency-bar-top">
           <div class="emergency-title">🔴 Emergência ativa</div>
           <button class="cancel-btn" onclick="cancelEmergency()">Cancelar alerta</button>
         </div>
         <div class="emergency-info">
-          <div class="em-row" id="em-gps">📍 Aguardando GPS...</div>
+          <div class="em-row" id="em-gps">📍 Obtendo localização...</div>
           <div class="em-row" id="em-audio">🎙️ Iniciando gravação...</div>
           <div class="em-row" id="em-telegram">📲 Enviando alertas...</div>
           <div class="em-row em-timer">⏱️ Tempo: <span id="elapsed">00:00</span></div>
         </div>
       </div>
 
-      <!-- Cards de funcionalidades -->
       <div class="features-strip">
-        <div class="feat-card">
-          <div class="feat-icon">📍</div>
-          <div class="feat-name">GPS em tempo real</div>
-        </div>
-        <div class="feat-card">
-          <div class="feat-icon">🎙️</div>
-          <div class="feat-name">Gravação auto</div>
-        </div>
-        <div class="feat-card">
-          <div class="feat-icon">🤖</div>
-          <div class="feat-name">Telegram Bot</div>
-        </div>
-        <div class="feat-card">
-          <div class="feat-icon">🔊</div>
-          <div class="feat-name">Botão Volume</div>
-        </div>
+        <div class="feat-card"><div class="feat-icon">📍</div><div class="feat-name">GPS tempo real</div></div>
+        <div class="feat-card"><div class="feat-icon">🎙️</div><div class="feat-name">Gravação auto</div></div>
+        <div class="feat-card"><div class="feat-icon">🤖</div><div class="feat-name">Telegram Bot</div></div>
+        <div class="feat-card"><div class="feat-icon">🔊</div><div class="feat-name">Botão Volume</div></div>
       </div>
 
-      <!-- Dica do botão físico -->
       <div class="tip-card">
         <div class="tip-icon">🔊</div>
-        <div class="tip-text">
-          <strong>Botão físico ativo!</strong><br/>
-          Pressione <strong>Volume+</strong> ou <strong>Volume−</strong> 3× para acionar o SOS sem tocar na tela.
-        </div>
+        <div class="tip-text"><strong>Botão físico ativo!</strong><br/>Pressione <strong>Volume+</strong> ou <strong>Volume−</strong> 3× para acionar o SOS.</div>
       </div>
     </div>
-
     <nav class="nav-tabs">
       <button class="nav-tab active" onclick="goTo('home')"><div class="nav-icon">🏠</div>SOS</button>
       <button class="nav-tab" onclick="goTo('contacts')"><div class="nav-icon">👥</div>Contatos</button>
@@ -104,48 +170,29 @@
     </nav>
   </div>
 
-  <!-- ===== TELA: CONTATOS ===== -->
+  <!-- CONTATOS -->
   <div class="screen" id="screen-contacts">
-    <div class="topbar">
-      <div class="logo"><div class="logo-icon">🛡️</div>SafeCheck SOS</div>
-      <span class="topbar-page">Contatos</span>
-    </div>
+    <div class="topbar"><div class="logo"><div class="logo-icon">🛡️</div>SafeCheck SOS</div><span class="topbar-page">Contatos</span></div>
     <div class="content">
       <div class="section-pad">
-
-        <!-- Info sobre o Telegram -->
         <div class="info-banner">
           <div class="info-banner-icon">🤖</div>
           <div class="info-banner-text">
             Para receber alertas, cada contato deve enviar <strong>/start</strong> para o bot
-            <strong id="bot-name">@SafeCheckSOSBot</strong> no Telegram e te passar o Chat ID.
+            <strong id="bot-name">@Heloale_bot</strong> no Telegram e te passar o Chat ID.
             <br/><br/>
             <a href="#" onclick="showChatIdInstructions()" class="link">Como obter o Chat ID? →</a>
           </div>
         </div>
-
-        <div class="sec-title" style="margin-top:16px;">Contatos cadastrados</div>
+        <div class="sec-title" style="margin-top:16px">Contatos cadastrados</div>
         <div id="contacts-list"></div>
-
-        <div style="margin-top: 20px;">
+        <div style="margin-top:20px">
           <div class="sec-title small">Adicionar contato</div>
           <div class="add-contact-form">
-            <div class="form-row">
-              <label class="form-label">Nome completo</label>
-              <input class="form-input" id="inp-name" type="text" placeholder="Ex: Maria Silva" />
-            </div>
-            <div class="form-row">
-              <label class="form-label">Telefone</label>
-              <input class="form-input" id="inp-phone" type="tel" placeholder="(21) 99999-9999" />
-            </div>
-            <div class="form-row">
-              <label class="form-label">Relação</label>
-              <input class="form-input" id="inp-rel" type="text" placeholder="Ex: Mãe, Amiga, Irmã" />
-            </div>
-            <div class="form-row">
-              <label class="form-label">Telegram Chat ID <span class="required">*obrigatório para alertas</span></label>
-              <input class="form-input" id="inp-chatid" type="text" placeholder="Ex: 123456789" />
-            </div>
+            <div class="form-row"><label class="form-label">Nome completo</label><input class="form-input" id="inp-name" type="text" placeholder="Ex: Maria Silva"/></div>
+            <div class="form-row"><label class="form-label">Telefone</label><input class="form-input" id="inp-phone" type="tel" placeholder="(21) 99999-9999"/></div>
+            <div class="form-row"><label class="form-label">Relação</label><input class="form-input" id="inp-rel" type="text" placeholder="Ex: Mãe, Amiga, Irmã"/></div>
+            <div class="form-row"><label class="form-label">Telegram Chat ID <span class="required">*obrigatório para alertas</span></label><input class="form-input" id="inp-chatid" type="text" placeholder="Ex: 123456789"/></div>
             <button class="save-btn" onclick="addContact()">Salvar contato</button>
           </div>
         </div>
@@ -159,15 +206,10 @@
     </nav>
   </div>
 
-  <!-- ===== TELA: HISTÓRICO ===== -->
+  <!-- HISTÓRICO -->
   <div class="screen" id="screen-history">
-    <div class="topbar">
-      <div class="logo"><div class="logo-icon">🛡️</div>SafeCheck SOS</div>
-      <span class="topbar-page">Histórico</span>
-    </div>
-    <div class="content" style="padding: 0 20px;">
-      <div id="history-list"></div>
-    </div>
+    <div class="topbar"><div class="logo"><div class="logo-icon">🛡️</div>SafeCheck SOS</div><span class="topbar-page">Histórico</span></div>
+    <div class="content" style="padding:0 20px"><div id="history-list"></div></div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('home')"><div class="nav-icon">🏠</div>SOS</button>
       <button class="nav-tab" onclick="goTo('contacts')"><div class="nav-icon">👥</div>Contatos</button>
@@ -176,52 +218,29 @@
     </nav>
   </div>
 
-  <!-- ===== TELA: PERFIL ===== -->
+  <!-- PERFIL -->
   <div class="screen" id="screen-profile">
-    <div class="topbar">
-      <div class="logo"><div class="logo-icon">🛡️</div>SafeCheck SOS</div>
-      <span class="topbar-page">Perfil</span>
-    </div>
+    <div class="topbar"><div class="logo"><div class="logo-icon">🛡️</div>SafeCheck SOS</div><span class="topbar-page">Perfil</span></div>
     <div class="content">
       <div class="profile-hero">
-        <div class="profile-avatar">AS</div>
-        <div class="profile-name">Ana Silva</div>
-        <div class="profile-email">ana.silva@email.com</div>
+        <div class="profile-avatar" id="profile-avatar">?</div>
+        <div class="profile-name" id="profile-name">Carregando...</div>
+        <div class="profile-email" id="profile-email"></div>
       </div>
-
       <div class="settings-group">
         <div class="settings-label">Sistema</div>
-        <div class="setting-row">
-          <div><div class="setting-text">Gravação de áudio automática</div><div class="setting-sub">Inicia ao ativar o SOS</div></div>
-          <button class="toggle on" id="tog-audio" onclick="toggleSetting(this,'audio')"></button>
-        </div>
-        <div class="setting-row">
-          <div><div class="setting-text">Localização em tempo real</div><div class="setting-sub">Envia GPS aos contatos</div></div>
-          <button class="toggle on" id="tog-gps" onclick="toggleSetting(this,'gps')"></button>
-        </div>
-        <div class="setting-row">
-          <div><div class="setting-text">Botão Volume físico</div><div class="setting-sub">Volume+ ou Volume− 3× aciona SOS</div></div>
-          <button class="toggle on" id="tog-volume" onclick="toggleSetting(this,'volume')"></button>
-        </div>
-        <div class="setting-row">
-          <div><div class="setting-text">Alerta sonoro</div><div class="setting-sub">Beep ao ativar emergência</div></div>
-          <button class="toggle on" id="tog-sound" onclick="toggleSetting(this,'sound')"></button>
-        </div>
+        <div class="setting-row"><div><div class="setting-text">Gravação de áudio automática</div><div class="setting-sub">Inicia ao ativar o SOS</div></div><button class="toggle on" id="tog-audio" onclick="toggleSetting(this,'audio')"></button></div>
+        <div class="setting-row"><div><div class="setting-text">Localização em tempo real</div><div class="setting-sub">Envia GPS aos contatos</div></div><button class="toggle on" id="tog-gps" onclick="toggleSetting(this,'gps')"></button></div>
+        <div class="setting-row"><div><div class="setting-text">Botão Volume físico</div><div class="setting-sub">Volume+ ou Volume− 3× aciona SOS</div></div><button class="toggle on" id="tog-volume" onclick="toggleSetting(this,'volume')"></button></div>
+        <div class="setting-row"><div><div class="setting-text">Alerta sonoro</div><div class="setting-sub">Beep ao ativar emergência</div></div><button class="toggle on" id="tog-sound" onclick="toggleSetting(this,'sound')"></button></div>
       </div>
-
       <div class="settings-group">
         <div class="settings-label">Telegram Bot</div>
-        <div class="setting-row">
-          <div><div class="setting-text">Status do bot</div><div class="setting-sub" id="bot-status">Verificando...</div></div>
-          <span id="bot-status-icon">⏳</span>
-        </div>
+        <div class="setting-row"><div><div class="setting-text">Status do bot</div><div class="setting-sub" id="bot-status">Verificando...</div></div><span id="bot-status-icon">⏳</span></div>
       </div>
-
       <div class="settings-group">
         <div class="settings-label">Conta</div>
-        <div class="setting-row clickable" onclick="showToast('Em breve!')">
-          <div class="setting-text danger">Limpar histórico</div>
-        </div>
+        <div class="setting-row clickable" onclick="signOut()"><div class="setting-text danger">Sair da conta</div></div>
       </div>
     </div>
     <nav class="nav-tabs">
@@ -234,25 +253,24 @@
 
 </div><!-- fim #app -->
 
-<!-- Modal instruções Chat ID -->
+<!-- Modal Chat ID -->
 <div class="modal-overlay" id="modal-chatid" onclick="closeModal()">
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-title">Como obter o Chat ID</div>
     <div class="modal-steps">
-      <div class="modal-step"><span class="step-num">1</span> O contato abre o Telegram e pesquisa por <strong id="bot-name-modal">@SafeCheckSOSBot</strong></div>
-      <div class="modal-step"><span class="step-num">2</span> Ele clica em <strong>Start</strong> ou envia <strong>/start</strong></div>
-      <div class="modal-step"><span class="step-num">3</span> O bot responde automaticamente com o Chat ID</div>
-      <div class="modal-step"><span class="step-num">4</span> O contato te envia esse número</div>
-      <div class="modal-step"><span class="step-num">5</span> Você cadastra o número no campo Chat ID</div>
+      <div class="modal-step"><span class="step-num">1</span>O contato abre o Telegram e pesquisa por <strong id="bot-name-modal">@Heloale_bot</strong></div>
+      <div class="modal-step"><span class="step-num">2</span>Clica em <strong>Start</strong> ou envia <strong>/start</strong></div>
+      <div class="modal-step"><span class="step-num">3</span>O bot responde com o Chat ID automaticamente</div>
+      <div class="modal-step"><span class="step-num">4</span>O contato te envia esse número</div>
+      <div class="modal-step"><span class="step-num">5</span>Você cadastra no campo Chat ID acima</div>
     </div>
     <button class="save-btn" onclick="closeModal()">Entendido!</button>
   </div>
 </div>
 
-<!-- Toast -->
 <div class="toast" id="toast"></div>
 
-<script src="/js/data.js"></script>
+<script src="/js/auth.js"></script>
 <script src="/js/app.js"></script>
 <script src="/js/sos.js"></script>
 <script src="/js/contacts.js"></script>
